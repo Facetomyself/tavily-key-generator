@@ -1,0 +1,61 @@
+services:
+  camoufox:
+    build:
+      context: ./camoufox
+      dockerfile: Dockerfile
+    container_name: tavily-camoufox
+    restart: unless-stopped
+    environment:
+      CAMOU_HEADLESS: "true"
+      CAMOU_PORT: "9222"
+      CAMOU_WS_PATH: camoufox
+    expose:
+      - "9222"
+
+  camoufox-adapter:
+    build:
+      context: ./adapter
+      dockerfile: Dockerfile
+    container_name: tavily-camoufox-adapter
+    restart: unless-stopped
+    depends_on:
+      - camoufox
+    environment:
+      CAMOUFOX_WS_URL: ws://camoufox:9222/camoufox
+    ports:
+      - "16072:5072"
+
+  tavily-scheduler:
+    build: .
+    container_name: tavily-scheduler
+    restart: unless-stopped
+    depends_on:
+      - camoufox-adapter
+    volumes:
+      - ./config.py:/app/config.py:ro
+      - ./output:/app/output
+    environment:
+      TZ: Asia/Shanghai
+      TAVILY_INTERVAL_SECONDS: "2160"
+      TAVILY_INITIAL_DELAY_SECONDS: "0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - /bin/sh
+      - -lc
+      - |
+          set -eu
+          interval="$${TAVILY_INTERVAL_SECONDS:-2160}"
+          initial_delay="$${TAVILY_INITIAL_DELAY_SECONDS:-0}"
+          echo "[scheduler] interval=$${interval}s initial_delay=$${initial_delay}s"
+          if [ "$${initial_delay}" -gt 0 ] 2>/dev/null; then
+            sleep "$${initial_delay}"
+          fi
+          while true; do
+            start_ts=$$(date '+%Y-%m-%d %H:%M:%S %z')
+            echo "[scheduler] starting registration at $${start_ts}"
+            python main.py || true
+            end_ts=$$(date '+%Y-%m-%d %H:%M:%S %z')
+            echo "[scheduler] run finished at $${end_ts}; sleeping $${interval}s"
+            sleep "$${interval}"
+          done
