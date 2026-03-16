@@ -147,7 +147,7 @@ def main():
     print(f"\n{'=' * 50}")
     print(f"🎉 全部完成! 耗时 {elapsed:.0f}s")
     print(f"📊 成功 {success_count}/{count} | 失败 {fail_count}/{count}")
-    print(f"📄 API Key 已保存到 api_keys.md")
+    print(f"📄 API Key 已保存到 {config.API_KEYS_FILE}")
     print(f"{'=' * 50}")
 
 
