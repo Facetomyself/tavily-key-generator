@@ -32,13 +32,17 @@ services:
     depends_on:
       - camoufox-adapter
     volumes:
+      # config.py 需要由你自己从 config.example.py 复制并填写
       - ./config.py:/app/config.py:ro
+      # 推荐把输出落到 output/，方便持久化和后续导入 proxy
       - ./output:/app/output
     environment:
       TZ: Asia/Shanghai
+      # 2160 秒 ≈ 36 分钟；适合 RUN_COUNT=1 / RUN_THREADS=1 的长期低频模式
       TAVILY_INTERVAL_SECONDS: "2160"
       TAVILY_INITIAL_DELAY_SECONDS: "0"
     extra_hosts:
+      # 如果容器里需要访问宿主机上的 Tavily Proxy，可使用 host.docker.internal
       - "host.docker.internal:host-gateway"
     command:
       - /bin/sh
