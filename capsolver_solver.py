@@ -2,7 +2,7 @@
 """
 Turnstile 验证码解决器
 支持：
-- adapter: 复用本机 grok-register camoufox-adapter
+- adapter: 使用配置中的 TURNSTILE_ADAPTER_URL 指向的 adapter 服务
 - capsolver: 官方 CapSolver API
 """
 import re
