@@ -1,6 +1,13 @@
 """
-配置文件 - 复制为 config.py 并填写你的信息
-cp config.example.py config.py
+配置文件模板
+
+使用方法：
+  cp config.example.py config.py
+
+说明：
+- 本文件只放示例值，不要提交真实密码 / token
+- 长期运行时，推荐把 API_KEYS_FILE 指向 output/ 目录
+- 如果使用 adapter 模式，记得配置 TURNSTILE_ADAPTER_URL
 """
 
 EMAIL_PROVIDER = "cloudflare"
@@ -19,13 +26,18 @@ DUCKMAIL_BEARER = ""
 DUCKMAIL_DOMAIN = "duckmail.sbs"
 
 # ═══ 验证码 ═══
-CAPTCHA_SOLVER = "browser"
+# 可选值：
+# - "browser"    : 浏览器内尝试点击/等待，不适合长期稳定运行
+# - "capsolver" : 使用 CapSolver API
+# - "adapter"   : 使用本项目自带的 camoufox-adapter
+CAPTCHA_SOLVER = "adapter"
 CAPSOLVER_API_KEY = ""
+TURNSTILE_ADAPTER_URL = "http://camoufox-adapter:5072"
 
 # ═══ 注册配置 ═══
 DEFAULT_PASSWORD = "TavilyAuto123!"
-API_KEYS_FILE = "api_keys.md"
-RUN_COUNT = 10
+API_KEYS_FILE = "output/api_keys.md"
+RUN_COUNT = 1
 RUN_THREADS = 1
 
 # ═══ 等待时间（秒） ═══
@@ -41,6 +53,9 @@ BROWSER_TIMEOUT = 30000
 BROWSER_TYPE = "firefox"
 
 # ═══ Proxy 自动上传 ═══
+# 说明：
+# - 若 generator 跑在容器里，PROXY_URL 不要想当然写 127.0.0.1
+# - 常见可用方式是 host.docker.internal 或同 compose 网络服务名
 PROXY_AUTO_UPLOAD = False
 PROXY_URL = ""
 PROXY_ADMIN_PASSWORD = ""
