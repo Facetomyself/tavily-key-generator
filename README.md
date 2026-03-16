@@ -299,7 +299,7 @@ docker compose up -d
 
 默认服务运行在：
 - `http://localhost:9874`
-- 控制台：`/console`
+- 控制台：`/`
 
 ### Example API calls
 
