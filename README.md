@@ -2,181 +2,258 @@
 
 批量注册 Tavily 账户获取 API Key，并通过代理网关池化管理，对外提供统一 API 端点。
 
-## 功能概览
+> 当前仓库包含两部分：
+> 1. **Key Generator**：自动注册 Tavily 账户并产出 API Key
+> 2. **API Proxy**：将多个 Tavily Key 池化，对外暴露统一 Search / Extract API
 
-| 模块 | 说明 |
-|------|------|
-| **Key Generator**（根目录） | 自动批量注册 Tavily 账户，获取 API Key |
-| **API Proxy**（`proxy/`） | 将多个 Key 池化，统一出口 + Web 控制台 |
-
-## 截图
-
-### Web 控制台
-
-![控制台](docs/console.jpg)
-
-### 自动注册流程
-
-![注册](docs/register.jpg)
+这份 README 已按当前项目结构和已验证实践更新，尤其补充了：
+- `adapter` 模式的实际用法
+- `camoufox + camoufox-adapter + tavily-scheduler` 的 compose 方案
+- Proxy 自动上传的工作方式
+- 与长期运行环境更贴近的部署建议
 
 ---
 
-## API Proxy（代理网关）
+## 1. Repository Layout
 
-将多个 Tavily API Key 池化，对外暴露统一端点和 Token，附带 Web 管理控制台。
+```text
+.
+├── main.py                        # 注册入口
+├── intelligent_tavily_automation.py
+├── browser_solver.py
+├── capsolver_solver.py
+├── config.example.py              # 配置模板
+├── docker-compose.yml             # 推荐的 scheduler + adapter compose 方案
+├── adapter/                       # Turnstile adapter
+├── camoufox/                      # Camoufox browser runtime
+├── email_providers/               # 邮箱后端实现
+├── proxy/                         # Tavily API proxy + web console
+└── docs/                          # 截图等文档资源
+```
 
-### 功能
+---
 
-- **Key 池化轮询**：Round-robin 分配请求，连续失败 3 次自动禁用
-- **Token 管理**：创建访问 Token，兼容 Tavily 官方 `tvly-` 格式
-- **用量统计**：实时查看总额度、已用/剩余次数，新增 Key 自动增加额度
-- **Web 控制台**：可视化管理 Key、Token 和用量，内置 API 调用示例
-- **批量导入**：支持从 `api_keys.md` 格式文本批量导入 Key
-- **兼容 Tavily 官方 API**：客户端只需改 base URL 即可
+## 2. What This Project Does
 
-### Docker 部署
+### A. Key Generator
+
+自动完成 Tavily 注册流程：
+- 打开注册页
+- 处理 Cloudflare Turnstile
+- 从邮箱中读取验证链接
+- 登录并提取 API Key
+- 保存到本地文件
+- 可选：自动上传到 Proxy
+
+### B. API Proxy
+
+将多个 Tavily API Key 池化，对外提供统一 API：
+- `/api/search`
+- `/api/extract`
+- Web 控制台
+- Token 管理
+- Key 管理 / 禁用 / 轮询
+- 用量统计
+
+---
+
+## 3. Main Modes
+
+### Mode 1: Run generator directly
+
+适合一次性注册、调试或本地验证：
 
 ```bash
-cd proxy/
+pip install -r requirements.txt
+playwright install firefox
+cp config.example.py config.py
+# 编辑 config.py
+python main.py
+```
+
+### Mode 2: Run proxy only
+
+适合你已经有一批 Tavily API Key，只想把它们池化并提供统一 API：
+
+```bash
+cd proxy
 cp .env.example .env
-# 编辑 .env 中的 ADMIN_PASSWORD
+# 编辑 .env
 docker compose up -d
 ```
 
-服务运行在 `http://localhost:9874`，访问 `/console` 进入管理控制台。
+### Mode 3: Long-running scheduler + adapter stack
 
-### 使用方式
+适合长期低频注册。当前更推荐这个方案，而不是让一个注册进程常驻自旋并混杂所有职责。
 
-1. 访问 `http://your-server:9874/console`，输入管理密码登录
-2. 导入 Tavily API Key（支持单个添加或批量导入）
-3. 创建 Token，复制 Token
-4. 在应用中调用代理：
+仓库根目录自带 `docker-compose.yml`，部署的是：
+- `tavily-camoufox`
+- `tavily-camoufox-adapter`
+- `tavily-scheduler`
 
-```bash
-# Search
-curl -X POST http://your-server:9874/api/search \
-  -H "Authorization: Bearer tvly-YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "hello world"}'
-
-# Extract
-curl -X POST http://your-server:9874/api/extract \
-  -H "Authorization: Bearer tvly-YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"urls": ["https://example.com"]}'
-```
-
-也可以在 body 中传 `api_key` 字段，与 Tavily 官方 SDK 用法一致。
-
-### API 参考
-
-**代理端点**（需要 Token 认证）：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/search` | 代理 Tavily Search API |
-| POST | `/api/extract` | 代理 Tavily Extract API |
-
-**管理端点**（需要 `X-Admin-Password` 请求头）：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/console` | Web 管理控制台 |
-| GET | `/api/stats` | 用量统计概览 |
-| GET/POST | `/api/keys` | 列出/添加 Key |
-| DELETE | `/api/keys/{id}` | 删除 Key |
-| PUT | `/api/keys/{id}/toggle` | 启用/禁用 Key |
-| GET/POST | `/api/tokens` | 列出/创建 Token |
-| DELETE | `/api/tokens/{id}` | 删除 Token |
-| PUT | `/api/password` | 修改管理密码 |
+这个方案适合：
+- 独立 solver 栈
+- 独立调度周期
+- 单次注册频率可控
+- 与其他自动化项目隔离
 
 ---
 
-## Key Generator（批量注册）
-
-自动批量注册 Tavily 账户并获取 API Key。
-
-### 功能
-
-- Playwright 浏览器自动化，全流程无人值守
-- 自动解决 Cloudflare Turnstile 验证码（CapSolver API）
-- 自动接收验证邮件并完成邮箱验证
-- 可插拔邮箱后端：Cloudflare Email Worker / DuckMail
-- 多线程并行注册，带冷却间隔防风控
-- 注册成功后自动上传到 Proxy 网关
-
-### 快速开始
+## 4. Generator Quick Start
 
 ```bash
-git clone https://github.com/skernelx/tavily-key-generator.git
+git clone https://github.com/Facetomyself/tavily-key-generator.git
 cd tavily-key-generator
 pip install -r requirements.txt
 playwright install firefox
 cp config.example.py config.py
-# 编辑 config.py 填写配置
+# 编辑 config.py
 python main.py
 ```
 
-### Compose 定时注册（每 3 小时 5 个的方案）
+### Minimal config
 
-如果要以**平均每 36 分钟 1 个**的频率长期运行，推荐使用独立 solver + scheduler 的 compose 方案，而不是让主注册容器常驻自循环。
+至少要配置：
+- 一个邮箱后端
+- 一个验证码求解方式
 
-当前建议拓扑：
+例如：
 
-- `camoufox`：Tavily 私有浏览器后端
-- `camoufox-adapter`：Tavily 私有 Turnstile solver（宿主机端口 `16072`）
-- `tavily-scheduler`：每次只跑 `RUN_COUNT = 1` / `RUN_THREADS = 1`，完成后睡眠 `2160` 秒再触发下一轮
+```python
+EMAIL_PROVIDER = "cloudflare"
+EMAIL_DOMAIN = "example.com"
+EMAIL_PREFIX = "tavily"
+EMAIL_API_URL = "https://mail.example.com"
+EMAIL_API_TOKEN = "..."
 
-这样更容易控制频率，也不会和其他项目（例如 Grok）的 solver 混用。
+CAPTCHA_SOLVER = "adapter"
+TURNSTILE_ADAPTER_URL = "http://camoufox-adapter:5072"
 
-### 配置说明
+RUN_COUNT = 1
+RUN_THREADS = 1
+API_KEYS_FILE = "output/api_keys.md"
+```
 
-#### 验证码（必配）
+> 注意：`API_KEYS_FILE` 在当前长期运行方案里通常建议写到 `output/api_keys.md`，并通过 volume 持久化输出。
 
-Tavily 注册页使用 Cloudflare Turnstile 验证码：
+---
 
-| 模式 | 配置值 | 成本 | 成功率 | 说明 |
-|------|--------|------|--------|------|
-| **CapSolver** | `"capsolver"` | ~$0.001/次 | **高** | **推荐**，稳定可靠 |
-| 浏览器点击 | `"browser"` | 免费 | 低 | 容易被检测，仅供尝试 |
+## 5. Email Backends
+
+### Cloudflare / private tmail worker
+
+当前代码已经兼容两种常见口径：
+- Bearer token 风格 worker
+- 双密码私有 worker（`EMAIL_ADMIN_PASSWORD` / `EMAIL_SITE_PASSWORD`）
+
+示例：
+
+```python
+EMAIL_PROVIDER = "cloudflare"
+EMAIL_DOMAIN = "example.com"
+EMAIL_PREFIX = "tavily"
+EMAIL_API_URL = "https://mail.example.com"
+EMAIL_API_TOKEN = ""
+EMAIL_ADMIN_PASSWORD = "..."
+EMAIL_SITE_PASSWORD = "..."
+```
+
+### DuckMail
+
+```python
+EMAIL_PROVIDER = "duckmail"
+DUCKMAIL_API_BASE = "https://api.duckmail.sbs"
+DUCKMAIL_BEARER = "..."
+DUCKMAIL_DOMAIN = "duckmail.sbs"
+```
+
+如果只配置一个后端，程序会自动使用；如果配置多个，运行时会让你选择。
+
+---
+
+## 6. CAPTCHA Solver Modes
+
+### Option A: CapSolver
 
 ```python
 CAPTCHA_SOLVER = "capsolver"
-CAPSOLVER_API_KEY = "CAP-xxx"   # 从 capsolver.com 获取
+CAPSOLVER_API_KEY = "CAP-..."
 ```
 
-也支持本地 **adapter** 模式（推荐在本项目内使用独立 `camoufox + camoufox-adapter`，不要复用其他项目的 solver）：
+优点：
+- 稳定
+- 成功率通常更高
+
+缺点：
+- 有成本
+
+### Option B: Adapter mode
 
 ```python
 CAPTCHA_SOLVER = "adapter"
 TURNSTILE_ADAPTER_URL = "http://camoufox-adapter:5072"
 ```
 
-#### 邮箱后端（必配）
+这是当前仓库更值得推荐的长期运行模式之一，特别适合配合 compose 中的：
+- `camoufox`
+- `camoufox-adapter`
+- `tavily-scheduler`
 
-需要一个能接收邮件的后端来获取验证链接，二选一：
-
-**方案 A：Cloudflare Email Worker**（自建，免费）
-
-```python
-EMAIL_DOMAIN = "example.com"
-EMAIL_API_URL = "https://mail.example.com"
-EMAIL_API_TOKEN = "your-token"
-```
-
-**方案 B：DuckMail**（第三方临时邮箱）
+### Option C: Browser mode
 
 ```python
-DUCKMAIL_API_BASE = "https://api.duckmail.sbs"
-DUCKMAIL_BEARER = "dk_xxx"
-DUCKMAIL_DOMAIN = "duckmail.sbs"
+CAPTCHA_SOLVER = "browser"
 ```
 
-配置了多个后端时，运行时会提示选择；只配置一个则自动使用。
+只适合本地尝试，不适合作为稳定的长期方案。
 
-#### 自动上传到 Proxy（可选）
+---
 
-注册成功后自动将 API Key 推送到 Proxy 网关：
+## 7. Recommended Long-Running Compose Deployment
+
+仓库根目录的 `docker-compose.yml` 当前更适合作为长期低频调度方案：
+
+- `camoufox`：浏览器运行时
+- `camoufox-adapter`：Turnstile adapter
+- `tavily-scheduler`：按间隔触发 `python main.py`
+
+### Why this layout
+
+相比“注册脚本自己在内部无限循环”，这个方案更清晰：
+- 调度逻辑独立
+- solver 独立
+- 输出目录持久化
+- 可读性更好
+- 更适合与其他项目隔离运行
+
+### Current compose behavior
+
+默认 scheduler 行为：
+- 由环境变量 `TAVILY_INTERVAL_SECONDS` 控制循环间隔
+- 每轮执行一次 `python main.py`
+- 单轮注册数量由 `config.py` 中的 `RUN_COUNT` / `RUN_THREADS` 决定
+
+如果你想要“平均每 36 分钟 1 个”的节奏，可以使用类似：
+
+```yaml
+environment:
+  TAVILY_INTERVAL_SECONDS: "2160"
+```
+
+同时在 `config.py` 中设置：
+
+```python
+RUN_COUNT = 1
+RUN_THREADS = 1
+```
+
+这会比一次性高并发注册更稳，也更不容易触发风控。
+
+---
+
+## 8. Proxy Auto Upload
+
+注册成功后，可以自动把 API Key 推送到 Proxy：
 
 ```python
 PROXY_AUTO_UPLOAD = True
@@ -184,34 +261,148 @@ PROXY_URL = "http://your-server:9874"
 PROXY_ADMIN_PASSWORD = "your-password"
 ```
 
+### Important container note
+
+如果 generator 跑在容器里，而 proxy 跑在宿主机或其他容器网络外部：
+
+- **不要默认写 `127.0.0.1:9874`**
+- 这通常只会指向 generator 容器自己
+
+更常见的工作方式是：
+- 使用 `host.docker.internal`
+- 或使用明确的 compose 网络服务名
+- 或使用宿主机可达地址
+
+例如：
+
+```python
+PROXY_URL = "http://host.docker.internal:9874"
+```
+
+并在 compose 中加入：
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
 ---
 
-## 注意事项
+## 9. Proxy Quick Start
 
-### 风控与频率限制
+```bash
+cd proxy
+cp .env.example .env
+# 编辑 .env 中的 ADMIN_PASSWORD
+docker compose up -d
+```
 
-- **注册频率**：Tavily 有 IP 级别的风控机制，注册过快会导致后续请求全部失败。默认冷却间隔 45 秒 + 随机抖动，**不建议调低**
-- **并行线程**：默认 2 线程，**不建议超过 3 线程**。线程越多触发风控的概率越高
-- **IP 封禁**：同一 IP 短时间内大量注册会被临时封禁，建议单次批量不超过 20 个，间隔一段时间后再继续
-- **浏览器指纹**：使用 Firefox 无头模式，已做基本反检测处理，但不保证长期有效
-- **验证码失败**：如果频繁出现验证码失败，说明可能触发了更高级别的风控，建议暂停一段时间（数小时）后重试
+默认服务运行在：
+- `http://localhost:9874`
+- 控制台：`/console`
 
-### 免费额度
+### Example API calls
 
-- 每个 Tavily 免费账户有 **1000 次/月** API 调用额度
-- Proxy 控制台会自动计算总额度（活跃 Key 数 × 1000）
-- 添加新 Key 后总额度自动增加，禁用/删除 Key 后自动减少
+```bash
+curl -X POST http://your-server:9874/api/search \
+  -H "Authorization: Bearer tvly-YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "hello world"}'
 
-### 安全建议
+curl -X POST http://your-server:9874/api/extract \
+  -H "Authorization: Bearer tvly-YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://example.com"]}'
+```
 
-- 部署 Proxy 后务必**修改默认管理密码**（可在控制台右上角修改）
-- 建议配合 Nginx 反向代理 + HTTPS 使用
-- 不要将 `config.py` 提交到公开仓库（已在 `.gitignore` 中）
+---
 
-## License
+## 10. Operational Notes
+
+### Rate limiting / risk control
+
+Tavily 注册存在明显的频率与风控限制：
+- 不建议高并发
+- 不建议过短间隔
+- 更推荐低频、长期、分散式地产生 key
+
+当前代码中：
+- 有全局冷却控制
+- 默认两次注册启动之间至少有间隔
+- 还有随机抖动
+
+### Recommended production posture
+
+对长期运行来说，更建议：
+- `RUN_COUNT = 1`
+- `RUN_THREADS = 1`
+- 用 scheduler 控制整体节奏
+- 不要和其他验证码/浏览器自动化项目共用同一套 solver，避免相互干扰
+
+### What to back up
+
+至少备份：
+- `config.py`
+- `output/`
+- `proxy/.env`
+- 任何本地补丁
+
+---
+
+## 11. Oracle-proxy Practice Notes
+
+以下是已经被实际验证过、但不依赖某个私有环境细节的经验：
+
+- scheduler + adapter + camoufox 的三段式部署是可行的
+- `RUN_COUNT = 1` / `RUN_THREADS = 1` 更适合长期运行
+- `API_KEYS_FILE = "output/api_keys.md"` 比直接写根目录更适合持久化
+- 如果自动上传到 Proxy，容器内访问宿主机 proxy 时通常要用 `host.docker.internal`
+- 建议给 Tavily 和其他项目分别使用独立 solver / adapter 栈，不要混用
+
+这些经验来自真实部署验证，但 README 不绑定任何单一生产环境，也不会要求你照搬某个私有配置。
+
+---
+
+## 12. Common Commands
+
+### Check scheduler stack
+
+```bash
+docker compose ps
+```
+
+### Rebuild scheduler stack
+
+```bash
+docker compose up -d --build
+```
+
+### Follow scheduler logs
+
+```bash
+docker logs -f tavily-scheduler
+```
+
+### Trigger one manual run
+
+```bash
+docker exec tavily-scheduler python main.py
+```
+
+---
+
+## 13. Security Notes
+
+- 不要把真实 `config.py` 提交到公开仓库
+- 不要把邮箱后台密码、token、代理管理密码直接写进 README
+- 对外文档写结构、写流程、写部署方式即可
+
+---
+
+## 14. License
 
 MIT
 
-## 免责声明
+## 15. Disclaimer
 
-本项目仅供个人学习和研究使用，不得用于商业用途。使用本工具产生的一切后果由使用者自行承担，与项目作者无关。请遵守 Tavily 的服务条款和相关法律法规，合理使用 API 资源。
+本项目仅供个人学习和研究使用。使用本工具产生的一切后果由使用者自行承担。请遵守 Tavily 的服务条款、目标站点规则以及相关法律法规。
